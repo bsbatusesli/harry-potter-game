@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// NFT contract to inherit from.
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-
-// Helper functions OpenZeppelin provides.
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
-
 import "hardhat/console.sol";
 import "./libraries/Base64.sol";
 
-// Our contract inherits from ERC721, which is the standard NFT contract!
 contract MyEpicGame is ERC721 {
     struct CharacterAttributes {
         uint256 characterIndex;
@@ -20,17 +15,22 @@ contract MyEpicGame is ERC721 {
         uint256 hp;
         uint256 maxHp;
         uint256 attackDamage;
+        uint8 level;
+        uint8 maxLevel;
+        uint256 earnedXp;
+        uint256 nextLevelXp;
     }
 
-    // The tokenId is the NFTs unique identifier, it's just a number that goes
-    // 0, 1, 2, 3, etc.
     using Counters for Counters.Counter;
     Counters.Counter private _tokenIds;
 
     CharacterAttributes[] defaultCharacters;
+    uint8 _playerMaxLevel = 99;
 
-    // We create a mapping from the nft's tokenId => that NFTs attributes.
+    // tokenId => NFTs attributes.
     mapping(uint256 => CharacterAttributes) public nftHolderAttributes;
+    // holder address => the NFTs tokenId.
+    mapping(address => uint256) public nftHolders;
 
     struct BigBoss {
         string name;
@@ -39,12 +39,7 @@ contract MyEpicGame is ERC721 {
         uint256 maxHp;
         uint256 attackDamage;
     }
-
     BigBoss public bigBoss;
-
-    // A mapping from an address => the NFTs tokenId. Gives me an ez way
-    // to store the owner of the NFT and reference it later.
-    mapping(address => uint256) public nftHolders;
 
     event CharacterNFTMinted(
         address sender,
@@ -62,12 +57,7 @@ contract MyEpicGame is ERC721 {
         string memory bossImageURI,
         uint256 bossHp,
         uint256 bossAttackDamage
-    )
-        // Below, you can also see I added some special identifier symbols for our NFT.
-        // This is the name and symbol for our token, ex Ethereum and ETH. I just call mine
-        // Heroes and HERO. Remember, an NFT is just a token!
-        ERC721("Hogwards Collection", "HOG")
-    {
+    ) ERC721("Hogwards Collection", "HOG") {
         bigBoss = BigBoss({
             name: bossName,
             imageURI: bossImageURI,
@@ -91,13 +81,16 @@ contract MyEpicGame is ERC721 {
                     imageURI: characterImageURIs[i],
                     hp: characterHp[i],
                     maxHp: characterHp[i],
-                    attackDamage: characterAttackDmg[i]
+                    attackDamage: characterAttackDmg[i],
+                    level: 1,
+                    maxLevel: _playerMaxLevel,
+                    earnedXp: 0,
+                    nextLevelXp: 10
                 })
             );
 
             CharacterAttributes memory c = defaultCharacters[i];
 
-            // Hardhat's use of console.log() allows up to 4 parameters in any order of following types: uint, string, bool, address
             console.log(
                 "Done initializing %s w/ HP %s, img ipfs://%s",
                 c.name,
@@ -105,30 +98,27 @@ contract MyEpicGame is ERC721 {
                 c.imageURI
             );
         }
-
-        // I increment _tokenIds here so that my first NFT has an ID of 1.
-        // More on this in the lesson!
-        _tokenIds.increment();
+        _tokenIds.increment(); // for making first tokenID = 1
     }
 
-    // Users would be able to hit this function and get their NFT based on the
-    // characterId they send in!
     function mintCharacterNFT(uint256 _characterIndex) external {
-        // Get current tokenId (starts at 1 since we incremented in the constructor).
         uint256 newItemId = _tokenIds.current();
 
-        // The magical function! Assigns the tokenId to the caller's wallet address.
+        // Assigns the tokenId to the caller's wallet address.
         _safeMint(msg.sender, newItemId);
 
-        // We map the tokenId => their character attributes. More on this in
-        // the lesson below.
         nftHolderAttributes[newItemId] = CharacterAttributes({
             characterIndex: _characterIndex,
             name: defaultCharacters[_characterIndex].name,
             imageURI: defaultCharacters[_characterIndex].imageURI,
             hp: defaultCharacters[_characterIndex].hp,
             maxHp: defaultCharacters[_characterIndex].maxHp,
-            attackDamage: defaultCharacters[_characterIndex].attackDamage
+            attackDamage: defaultCharacters[_characterIndex].attackDamage,
+            level: defaultCharacters[_characterIndex].level,
+            maxLevel: defaultCharacters[_characterIndex].maxLevel,
+            earnedXp: defaultCharacters[_characterIndex].earnedXp,
+            nextLevelXp: defaultCharacters[_characterIndex].nextLevelXp
+
         });
 
         console.log(
@@ -137,10 +127,7 @@ contract MyEpicGame is ERC721 {
             _characterIndex
         );
 
-        // Keep an easy way to see who owns what NFT.
         nftHolders[msg.sender] = newItemId;
-
-        // Increment the tokenId for the next person that uses it.
         _tokenIds.increment();
         emit CharacterNFTMinted(msg.sender, newItemId, _characterIndex);
     }
@@ -160,6 +147,8 @@ contract MyEpicGame is ERC721 {
         string memory strAttackDamage = Strings.toString(
             charAttributes.attackDamage
         );
+        string memory level = Strings.toString(charAttributes.level);
+        string memory maxLevel = Strings.toString(charAttributes.maxLevel);
 
         string memory json = Base64.encode(
             abi.encodePacked(
@@ -173,7 +162,11 @@ contract MyEpicGame is ERC721 {
                 strHp,
                 ', "max_value":',
                 strMaxHp,
-                '}, { "trait_type": "Attack Damage", "value": ',
+                '},{ "trait_type": "Level", "value": ',
+                level,
+                ', "max_level":',
+                maxLevel,
+                '},{ "trait_type": "Attack Damage", "value": ',
                 strAttackDamage,
                 "} ]}"
             )
@@ -212,6 +205,7 @@ contract MyEpicGame is ERC721 {
             bigBoss.hp = 0;
         } else {
             bigBoss.hp = bigBoss.hp - player.attackDamage;
+            earnXp(nftTokenIdOfPlayer, 6);
         }
         // Allow boss to attack player.
         if (player.hp < bigBoss.attackDamage) {
@@ -253,5 +247,28 @@ contract MyEpicGame is ERC721 {
 
     function getBigBoss() public view returns (BigBoss memory) {
         return bigBoss;
+    }
+
+    function earnXp(uint256 _tokenId, uint256 _amount) public {
+        CharacterAttributes storage player = nftHolderAttributes[_tokenId];
+        if(player.earnedXp + _amount >= player.nextLevelXp) {
+            player.earnedXp = 0;
+            player.level++;
+            player.nextLevelXp = calculateRequiredXp(player.level);
+            player.attackDamage += calculateAdIncrease(player.level);
+            player.hp = player.maxHp;
+            console.log("Character Level UP. New Level: %s", player.level);
+        } else {
+            player.earnedXp += _amount;
+            console.log("Character earned %s XP, %s XP required for next level", player.earnedXp, (player.nextLevelXp-player.earnedXp));
+        }
+    }
+
+    function calculateRequiredXp(uint256 _currentLevel) public pure returns(uint256){
+        return _currentLevel*10;
+    }
+
+    function calculateAdIncrease(uint256 _newLevel) public pure returns (uint256) {
+        return 2**_newLevel;
     }
 }

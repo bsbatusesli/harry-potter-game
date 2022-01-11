@@ -17,8 +17,14 @@ const main = async () => {
 
     txn = await gameContract.mintCharacterNFT(2);
     await txn.wait();
-
     console.log("Character minted!");
+
+    for (let i = 0; i < 7; i++) {
+        txn = await gameContract.attackBoss();
+        await txn.wait();
+      }
+
+
 };
 
 const runMain = async () => {
